@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  gw2-price-tracker:
+    build: .
+    container_name: gw2-price-tracker
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mount a persistent volume for settings.json
+      - ./data:/app/data
+    env_file:
+      - .env
