@@ -72,7 +72,7 @@ def fetch_item_list() -> pd.DataFrame:
     """Return all items for the dropdown selector."""
     return run_query(
         """
-        SELECT item_id, item_name, rarity, icon_url
+        SELECT item_id, item_name, rarity, icon_url, current_count
           FROM gw2_items
          ORDER BY item_name
         """
@@ -193,5 +193,37 @@ def fetch_daily_volumes_detail() -> pd.DataFrame:
           FROM mv_daily_volumes
          WHERE snap_date >= (CURRENT_DATE - INTERVAL '7 days')
          ORDER BY snap_date DESC
+        """
+    )
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_trading_signals() -> pd.DataFrame:
+    """Return swing trading signals from mv_trading_signals."""
+    return run_query(
+        """
+        SELECT item_id,
+               latest_sell,
+               latest_buy,
+               avg_sell_30d,
+               avg_buy_30d,
+               min_sell_30d,
+               max_sell_30d,
+               min_buy_30d,
+               max_buy_30d,
+               hist_min_sell,
+               hist_max_sell,
+               hist_min_buy,
+               hist_max_buy,
+               buy_z_score,
+               sell_z_score,
+               buy_range_pct,
+               sell_range_pct,
+               buy_trend_3d_vs_7d,
+               sell_trend_3d_vs_7d,
+               expected_profit_per_unit,
+               buy_volatility_pct,
+               sell_volatility_pct
+          FROM mv_trading_signals
         """
     )

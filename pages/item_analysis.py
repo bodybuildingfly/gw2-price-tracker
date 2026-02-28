@@ -5,38 +5,10 @@ Lets the user pick an item, then displays raw price and volume trends.
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
-import pytz
 from db import fetch_item_list, fetch_price_history, fetch_daily_volumes_detail
-from currency import format_gsc
 from settings import get
-
-
-def _make_tick_vals(lo: float, hi: float, n_ticks: int = 6) -> list[int]:
-    """Return ~n_ticks nicely-rounded copper values spanning lo..hi."""
-    if hi <= lo:
-        return [int(lo)]
-    raw_step = (hi - lo) / max(n_ticks - 1, 1)
-    # Round step to a "nice" number (multiples of gold/silver boundaries)
-    magnitude = 10 ** int(np.floor(np.log10(max(raw_step, 1))))
-    nice_step = int(np.ceil(raw_step / magnitude) * magnitude)
-    nice_step = max(nice_step, 1)
-    start = int(lo // nice_step) * nice_step
-    vals = list(range(start, int(hi) + nice_step, nice_step))
-    return vals
-
-
-def _localize(df, tz_name: str):
-    """Convert the recorded_at column to the user's chosen timezone."""
-    try:
-        tz = pytz.timezone(tz_name)
-    except pytz.UnknownTimeZoneError:
-        tz = pytz.UTC
-    if df["recorded_at"].dt.tz is None:
-        df["recorded_at"] = df["recorded_at"].dt.tz_localize("UTC")
-    df["recorded_at"] = df["recorded_at"].dt.tz_convert(tz)
-    return df
+from pages.charts import render_price_chart, _localize
 
 
 def page_item_analysis() -> None:
@@ -90,53 +62,7 @@ def page_item_analysis() -> None:
 
     # ── Price Trends chart ───────────────────────────────────────────
     st.subheader("Price Trends")
-
-    # Pre-compute g/s/c hover labels
-    sell_hover = price_df["sell_price_copper"].apply(format_gsc)
-    buy_hover = price_df["buy_price_copper"].apply(format_gsc)
-
-    # Build custom y-axis tick values & labels in g/s/c
-    all_prices = pd.concat(
-        [price_df["sell_price_copper"], price_df["buy_price_copper"]]
-    )
-    tick_vals = _make_tick_vals(all_prices.min(), all_prices.max())
-    tick_text = [format_gsc(int(v)) for v in tick_vals]
-
-    price_fig = go.Figure()
-    price_fig.add_trace(
-        go.Scatter(
-            x=price_df["recorded_at"],
-            y=price_df["sell_price_copper"],
-            mode="lines",
-            name="Sell Price",
-            line=dict(color="#e74c3c"),
-            hovertemplate="Sell: %{customdata}<extra></extra>",
-            customdata=sell_hover,
-        )
-    )
-    price_fig.add_trace(
-        go.Scatter(
-            x=price_df["recorded_at"],
-            y=price_df["buy_price_copper"],
-            mode="lines",
-            name="Buy Price",
-            line=dict(color="#2ecc71"),
-            hovertemplate="Buy: %{customdata}<extra></extra>",
-            customdata=buy_hover,
-        )
-    )
-    price_fig.update_layout(
-        yaxis=dict(
-            title="Price",
-            tickvals=tick_vals,
-            ticktext=tick_text,
-        ),
-        xaxis_title="Time",
-        legend=dict(orientation="h", y=1.12),
-        margin=dict(l=20, r=20, t=40, b=20),
-        hovermode="x unified",
-    )
-    st.plotly_chart(price_fig, width="stretch")
+    render_price_chart(item_id, selected_label, height=400)
 
     # ── Volume Trends chart ──────────────────────────────────────────
     st.subheader("Volume Trends")

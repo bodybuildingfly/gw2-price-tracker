@@ -1,30 +1,34 @@
 """
 Page 4 — AI Recommendations
-AI-powered Top 5 Buy / Sell analysis backed by price trends,
-volume data, and live GW2 market research via Google Search.
+AI-powered swing trading analysis: buy items at price dips,
+sell when they recover above average. Uses statistical signals
+from 30-day price history + daily transaction volume.
 """
 
 import io
+import re
 from datetime import date
 import streamlit as st
 import pandas as pd
 from google import genai
 from google.genai import types
-from db import fetch_opportunities, fetch_latest_volumes, fetch_item_trends, fetch_daily_volumes
+from db import fetch_trading_signals, fetch_daily_volumes, fetch_item_list
 from currency import format_gsc
 from settings import get
+from pages.charts import render_price_chart
 
 
 # ── Data helpers ─────────────────────────────────────────────────────
 
 def _load_data() -> pd.DataFrame:
-    """Fetch opportunities + latest volumes + 7d trends + daily volumes, merged."""
-    opp = fetch_opportunities()
-    vol = fetch_latest_volumes()
-    trends = fetch_item_trends()
+    """Fetch trading signals + item metadata + daily volumes, merged."""
+    signals = fetch_trading_signals()
+    items = fetch_item_list()
 
-    df = opp.merge(vol, on="item_id", how="left")
-    df = df.merge(trends, on="item_id", how="left")
+    df = signals.merge(
+        items[["item_id", "item_name", "current_count", "rarity"]],
+        on="item_id", how="left",
+    )
 
     # Merge daily transaction volumes (may not exist yet)
     try:
@@ -36,146 +40,133 @@ def _load_data() -> pd.DataFrame:
         df["avg_daily_sold"] = 0
         df["avg_daily_bought"] = 0
 
-    df["sell_quantity"] = df["sell_quantity"].fillna(0).astype(int)
-    df["buy_quantity"] = df["buy_quantity"].fillna(0).astype(int)
-
-    # Cast trend columns to float (PostgreSQL returns Decimal objects)
-    trend_cols = [
-        "avg_sell_7d", "avg_sell_prior_7d",
-        "avg_buy_7d", "avg_buy_prior_7d",
-        "avg_sell_qty_7d", "avg_sell_qty_prior_7d",
-        "avg_buy_qty_7d", "avg_buy_qty_prior_7d",
+    # Cast all numeric columns (PostgreSQL returns Decimal)
+    numeric_cols = [
+        "latest_sell", "latest_buy", "avg_sell_30d", "avg_buy_30d",
+        "min_sell_30d", "max_sell_30d", "min_buy_30d", "max_buy_30d",
+        "hist_min_sell", "hist_max_sell", "hist_min_buy", "hist_max_buy",
+        "buy_z_score", "sell_z_score", "buy_range_pct", "sell_range_pct",
+        "buy_trend_3d_vs_7d", "sell_trend_3d_vs_7d",
+        "expected_profit_per_unit", "buy_volatility_pct", "sell_volatility_pct",
+        "current_count",
     ]
-    for col in trend_cols:
+    for col in numeric_cols:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # Compute trend percentages (7d vs prior 7d)
-    for prefix in ["sell", "buy"]:
-        cur = f"avg_{prefix}_7d"
-        prev = f"avg_{prefix}_prior_7d"
-        df[f"{prefix}_price_trend_pct"] = (
-            ((df[cur] - df[prev]) / df[prev].replace(0, pd.NA)) * 100
-        ).round(1)
-
-    for prefix in ["sell_qty", "buy_qty"]:
-        cur = f"avg_{prefix}_7d"
-        prev = f"avg_{prefix}_prior_7d"
-        df[f"{prefix}_trend_pct"] = (
-            ((df[cur] - df[prev]) / df[prev].replace(0, pd.NA)) * 100
-        ).round(1)
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     return df
-
-
-def _clean(df: pd.DataFrame) -> pd.DataFrame:
-    """Return a copy with zero / null price rows removed."""
-    df = df.copy()
-    return df[
-        (df["latest_sell_copper"] > 0)
-        & (df["latest_buy_copper"] > 0)
-        & (df["avg_sell_copper_30d"] > 0)
-        & (df["avg_buy_copper_30d"] > 0)
-    ]
 
 
 # ── AI analysis ──────────────────────────────────────────────────────
 
 _ANALYSIS_SYSTEM = """\
-You are an expert Guild Wars 2 Trading Post analyst.
+You are an expert Guild Wars 2 Trading Post swing trading analyst.
 
 Today's date is {today}.
 
 You have access to Google Search. Use it to look up current GW2 events,
 patches, or balance changes that could affect item demand.
 
+STRATEGY: The player buys items when prices dip below normal, holds them,
+then sells when prices recover above average. This is NOT instant flipping.
+
 You will receive a market snapshot CSV. Key columns explained:
 - latest_buy / latest_sell: current TP prices
 - avg_buy_30d / avg_sell_30d: 30-day average prices
-- buy_discount_pct: how far below 30d avg the current buy price is (higher = better deal)
-- flip_margin_pct: profit margin after 15% tax = ((sell * 0.85) - buy) / buy * 100
-- sell_price_trend_7d / buy_price_trend_7d: price momentum (+ = rising)
-- sell_supply_trend_7d: listing volume change (+ = more supply = bearish)
-- buy_demand_trend_7d: buy order change (+ = more demand = bullish)
-- avg_daily_sold / avg_daily_bought: actual items traded per day (higher = more liquid)
+- buy_z_score: how many standard deviations BELOW average the buy price is
+  (more negative = deeper dip = stronger buy signal)
+- sell_z_score: how many std devs ABOVE average the sell price is
+  (more positive = higher above normal = stronger sell signal)
+- buy_range_pct: where current buy sits in its 30d range (0% = at floor, 100% = ceiling)
+- sell_range_pct: where current sell sits in its 30d range
+- buy_trend_3d_vs_7d: short-term momentum (positive = price recovering from dip)
+- sell_trend_3d_vs_7d: short-term momentum (negative = price peaking/falling)
+- expected_profit_per_unit: profit if price returns to 30d avg sell, after 15% tax
+- buy_volatility_pct / sell_volatility_pct: price swing range as % of average
+  (higher = more profitable swings)
+- avg_daily_sold / avg_daily_bought: actual items traded per day (liquidity)
+- total_sell_profit: total gold profit if all owned qty sold at current price after tax
 
-STRICT RULES — you MUST follow these:
-1. The TP takes 15% tax. A flip is ONLY profitable if flip_margin_pct > 0.
-2. NEVER recommend items with buy_discount_pct < 3% — those are noise, not real discounts.
-3. NEVER recommend items with avg_daily_sold < 5 — illiquid items are too risky.
-4. BUY list must be sorted by flip_margin_pct descending (most profitable first).
-5. SELL list must be sorted by sell premium above 30d avg descending (most overpriced first).
-6. For SELL, only include items where qty > 0 (player actually owns them).
+STRICT RULES:
+1. The TP takes 15% tax on all sales.
+2. BUY candidates: buy_z_score must be <= -1.0 (at least 1 std dev below average).
+3. BUY candidates: buy_trend_3d_vs_7d should be >= 0 (price recovering, not still falling).
+4. BUY candidates: avg_daily_sold must be >= 10 (liquid enough to resell later).
+5. BUY candidates: expected_profit_per_unit must be > 0.
+6. BUY list sorted by expected_profit_per_unit descending.
+7. SELL candidates: qty must be > 0 (player owns the item).
+8. SELL candidates: sell_z_score must be >= 0.5 (meaningfully above average).
+9. SELL candidates: total_sell_profit must be >= 1g (10000 copper).
+10. SELL list sorted by total_sell_profit descending.
 
-OUTPUT FORMAT — produce exactly two sections:
+OUTPUT FORMAT — exactly two sections:
 
-## Top 5 Buy Recommendations
-| # | Item | Buy Price | Flip Margin | Why |
-|---|------|-----------|-------------|-----|
-Rank 1 = highest flip_margin_pct. The "Why" column must be 1-2 sentences max
-citing: the discount %, 7d price trend, and daily volume.
+## Top 5 Buy Opportunities
+| # | Item | Buy Price | Avg Price | Expected Profit | Why |
+|---|------|-----------|-----------|-----------------|-----|
+Rank 1 = highest expected_profit_per_unit. "Why" = 1-2 sentences citing:
+z-score, range position, trend direction, and daily volume.
 
-## Top 5 Sell Recommendations
-| # | Item | Sell Price | Qty | Why |
-|---|------|------------|-----|-----|
-Rank 1 = highest premium above avg. The "Why" column must be 1-2 sentences max
-citing: the premium %, whether price is peaking or still rising, and daily volume.
+## Top 5 Sell Opportunities
+| # | Item | Sell Price | Qty | Total Profit | Why |
+|---|------|------------|-----|-------------|-----|
+Rank 1 = highest total_sell_profit. "Why" = 1-2 sentences citing:
+z-score, range position, trend direction, and daily volume.
 
 After both tables, add a "Market Context" paragraph (3 sentences max) with
 any relevant GW2 news from your search.
 
-If fewer than 5 items meet the criteria, list only those that do.
-Do NOT invent data or recommend items that violate the rules above.
+If fewer than 5 items meet the criteria, list only those that do and
+briefly explain why pickings are slim (e.g. "market is flat").
+Do NOT recommend items that violate the rules above.
 """
 
 
 def _build_ai_snapshot(df: pd.DataFrame) -> str:
-    """Build an enriched CSV with pre-computed profitability, volume, and trends."""
-    df = _clean(df)
+    """Build CSV with swing trading signals for the AI."""
+    # Compute total sell profit for owned items
+    df["total_sell_profit"] = (
+        (df["latest_sell"] * 0.85 - df["avg_buy_30d"]) * df["current_count"]
+    ).clip(lower=0).astype(int)
 
-    df["buy_discount_pct"] = (
-        ((df["avg_buy_copper_30d"] - df["latest_buy_copper"])
-         / df["avg_buy_copper_30d"].replace(0, pd.NA)) * 100
-    ).round(1)
-
-    df["flip_margin_pct"] = (
-        ((df["latest_sell_copper"] * 0.85 - df["latest_buy_copper"])
-         / df["latest_buy_copper"].replace(0, pd.NA)) * 100
-    ).round(1)
-
-    df["sell_premium_pct"] = (
-        ((df["latest_sell_copper"] - df["avg_sell_copper_30d"])
-         / df["avg_sell_copper_30d"].replace(0, pd.NA)) * 100
-    ).round(1)
-
-    df = df[df["sell_quantity"] >= 10].copy()
-    top = df.nlargest(100, "flip_margin_pct").copy()
-
-    for col in ["latest_sell_copper", "latest_buy_copper",
-                "avg_sell_copper_30d", "avg_buy_copper_30d"]:
-        top[col] = top[col].apply(
-            lambda v: format_gsc(int(v)) if pd.notna(v) else "0c"
+    # Format prices to g/s/c
+    price_cols = {
+        "latest_sell": "latest_sell",
+        "latest_buy": "latest_buy",
+        "avg_sell_30d": "avg_sell_30d",
+        "avg_buy_30d": "avg_buy_30d",
+        "expected_profit_per_unit": "expected_profit_per_unit",
+        "total_sell_profit": "total_sell_profit",
+    }
+    formatted = df.copy()
+    for col in price_cols:
+        formatted[col] = formatted[col].apply(
+            lambda v: format_gsc(int(v)) if pd.notna(v) and v > 0 else "0c"
         )
 
     out = pd.DataFrame({
-        "item_name": top["item_name"],
-        "qty": top["current_count"],
-        "latest_sell": top["latest_sell_copper"],
-        "latest_buy": top["latest_buy_copper"],
-        "avg_sell_30d": top["avg_sell_copper_30d"],
-        "avg_buy_30d": top["avg_buy_copper_30d"],
-        "buy_discount_pct": top["buy_discount_pct"].fillna(0),
-        "flip_margin_pct": top["flip_margin_pct"].fillna(0),
-        "sell_premium_pct": top["sell_premium_pct"].fillna(0),
-        "sell_listings": top["sell_quantity"],
-        "buy_orders": top["buy_quantity"],
-        "avg_daily_sold": top["avg_daily_sold"],
-        "avg_daily_bought": top["avg_daily_bought"],
-        "sell_price_trend_7d": top["sell_price_trend_pct"].fillna(0),
-        "buy_price_trend_7d": top["buy_price_trend_pct"].fillna(0),
-        "sell_supply_trend_7d": top["sell_qty_trend_pct"].fillna(0),
-        "buy_demand_trend_7d": top["buy_qty_trend_pct"].fillna(0),
+        "item_name": formatted["item_name"],
+        "qty": formatted["current_count"].astype(int),
+        "latest_sell": formatted["latest_sell"],
+        "latest_buy": formatted["latest_buy"],
+        "avg_sell_30d": formatted["avg_sell_30d"],
+        "avg_buy_30d": formatted["avg_buy_30d"],
+        "buy_z_score": df["buy_z_score"],
+        "sell_z_score": df["sell_z_score"],
+        "buy_range_pct": df["buy_range_pct"],
+        "sell_range_pct": df["sell_range_pct"],
+        "buy_trend_3d_vs_7d": df["buy_trend_3d_vs_7d"],
+        "sell_trend_3d_vs_7d": df["sell_trend_3d_vs_7d"],
+        "expected_profit_per_unit": formatted["expected_profit_per_unit"],
+        "buy_volatility_pct": df["buy_volatility_pct"],
+        "sell_volatility_pct": df["sell_volatility_pct"],
+        "avg_daily_sold": df["avg_daily_sold"],
+        "avg_daily_bought": df["avg_daily_bought"],
+        "total_sell_profit": formatted["total_sell_profit"],
     })
+
+    # Drop items with no name (unmatched joins)
+    out = out.dropna(subset=["item_name"])
 
     buf = io.StringIO()
     out.to_csv(buf, index=False)
@@ -206,13 +197,14 @@ def _extract_text(response) -> str:
 
 
 def _call_gemini(api_key: str, snapshot_csv: str) -> str:
-    """Send enriched data to Gemini with Google Search grounding."""
+    """Send trading signals to Gemini with Google Search grounding."""
     user_content = (
-        f"Here is my full market snapshot with trend data:\n\n"
+        f"Here is my market snapshot with swing trading signals:\n\n"
         f"```csv\n{snapshot_csv}```\n\n"
         f"First, search for current Guild Wars 2 news, events, updates, and "
-        f"Trading Post market trends. Then use everything — the data AND your "
-        f"search findings — to produce your Top 5 Buy and Top 5 Sell tables."
+        f"Trading Post market trends. Then analyze the data to find the best "
+        f"swing trade opportunities — items to buy at dips and items to sell "
+        f"at peaks."
     )
 
     client = genai.Client(api_key=api_key)
@@ -250,6 +242,16 @@ def _call_gemini(api_key: str, snapshot_csv: str) -> str:
     return _extract_text(response2) or "*No analysis was generated. Please try again.*"
 
 
+def _parse_item_names(analysis: str) -> list[str]:
+    """Extract item names from markdown table rows in the AI response."""
+    # Match table rows: | number | item name | ...
+    pattern = r'\|\s*\d+\s*\|\s*([^|]+?)\s*\|'
+    matches = re.findall(pattern, analysis)
+    # Filter out header-like matches
+    names = [m.strip() for m in matches if m.strip() and m.strip() != "Item"]
+    return names
+
+
 # ── Page ─────────────────────────────────────────────────────────────
 
 def page_ai_recommendations() -> None:
@@ -261,30 +263,64 @@ def page_ai_recommendations() -> None:
         return
 
     st.caption(
-        "Analyzes your market data combined with current GW2 news and events "
-        "to produce Top 5 Buy and Sell picks with reasoning."
+        "Swing trading analysis: finds items at price dips to buy, "
+        "and items you own at price peaks to sell. Uses 30-day statistical "
+        "signals, daily volume, and current GW2 news."
     )
 
-    if st.button("🤖 Generate AI Top 5 Picks", type="primary"):
-        with st.spinner("Loading market data…"):
+    if st.button("🤖 Generate Trading Recommendations", type="primary"):
+        with st.spinner("Loading trading signals…"):
             try:
                 df = _load_data()
             except Exception as exc:
+                import traceback
+                traceback.print_exc()
                 st.error(f"Database error: {exc}")
+                st.code(traceback.format_exc(), language="text")
                 return
 
             if df.empty:
-                st.warning("No opportunity data available.")
+                st.warning("No trading signal data available.")
                 return
 
-        with st.spinner("Researching GW2 market trends and analyzing data…"):
+            # Build item name → id mapping for chart lookups
+            item_map = dict(zip(df["item_name"], df["item_id"].astype(int)))
+            st.session_state["rec_item_map"] = item_map
+
+        with st.spinner("Analyzing market and researching GW2 news…"):
             try:
                 csv_str = _build_ai_snapshot(df)
                 analysis = _call_gemini(api_key, csv_str)
                 st.session_state["rec_ai_analysis"] = analysis
+                st.session_state["rec_ai_items"] = _parse_item_names(analysis)
             except Exception as exc:
+                import traceback
+                traceback.print_exc()
                 st.error(f"Gemini API error: {exc}")
+                st.code(traceback.format_exc(), language="text")
 
     if "rec_ai_analysis" in st.session_state:
         st.divider()
         st.markdown(st.session_state["rec_ai_analysis"])
+
+        # Chart viewer for recommended items
+        item_map = st.session_state.get("rec_item_map", {})
+        ai_items = st.session_state.get("rec_ai_items", [])
+
+        # Match parsed names to known items
+        chart_options = {
+            name: item_map[name]
+            for name in ai_items
+            if name in item_map
+        }
+
+        if chart_options:
+            st.divider()
+            st.subheader("📊 Price History")
+            selected = st.selectbox(
+                "Select a recommended item to view its chart",
+                options=list(chart_options.keys()),
+                index=0,
+            )
+            if selected:
+                render_price_chart(chart_options[selected], selected)
