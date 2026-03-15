@@ -79,49 +79,47 @@ then sells when prices recover above average. This is NOT instant flipping.
 You will receive a market snapshot CSV. Key columns explained:
 - item_name / gw2tp_url: item name and its GW2TP price history page
 - latest_buy / latest_sell: current TP prices
-- avg_buy_30d / avg_sell_30d: 30-day average prices
-- buy_z_score: how many standard deviations BELOW average the buy price is
-  (more negative = deeper dip = stronger buy signal)
-- sell_z_score: how many std devs ABOVE average the sell price is
-  (more positive = higher above normal = stronger sell signal)
-- buy_range_pct: where current buy sits in its 30d range (0% = at floor, 100% = ceiling)
-- sell_range_pct: where current sell sits in its 30d range
-- buy_trend_3d_vs_7d: short-term momentum (positive = price recovering from dip)
-- sell_trend_3d_vs_7d: short-term momentum (negative = price peaking/falling)
-- expected_profit_per_unit: profit if price returns to 30d avg sell, after 15% tax
-- buy_volatility_pct / sell_volatility_pct: price swing range as % of average
-  (higher = more profitable swings)
-- avg_daily_sold / avg_daily_bought: actual items traded per day (liquidity)
-- total_sell_profit: total gold received if all owned qty sold at current sell price after 15% tax
-- hist_max_sell: highest sell price in the past 30 days (excluding last 12 hours)
+- hist_max_buy: highest buy price in past 30 days (excl. last 12h)
+- hist_max_sell: highest sell price in past 30 days (excl. last 12h)
+- buy_discount_from_high_pct: how far below the 30d high buy price the current buy is
+- buy_profit_per_unit: profit per item if you buy now and sell at the 30d high sell, after 15% tax
+- avg_daily_sold: items sold per day (buy-side liquidity - can you resell it?)
+- avg_daily_bought: items bought per day (sell-side demand - will your listing fill?)
+- buy_z_score: std devs from average (more negative = deeper dip)
+- sell_z_score: std devs above average (more positive = higher peak)
+- buy_trend_3d_vs_7d: short-term momentum (positive = recovering)
+- sell_trend_3d_vs_7d: short-term momentum (negative = falling from peak)
+- buy_volatility_pct: price swing range as pct of average (higher = bigger swings)
+- total_sell_profit: total gold from selling full stack at current price after 15% tax
 
 STRICT RULES:
 1. The TP takes 15% tax on all sales.
-2. BUY candidates: buy_z_score must be <= -1.0 (at least 1 std dev below average).
-3. BUY candidates: buy_trend_3d_vs_7d should be >= 0 (price recovering, not still falling).
+2. BUY candidates: buy_profit_per_unit must be > 0 (profitable if price reverts to 30d high).
+3. BUY candidates: buy_discount_from_high_pct must be >= 5 (meaningful dip from 30d high).
 4. BUY candidates: avg_daily_sold must be >= 10 (liquid enough to resell later).
-5. BUY candidates: expected_profit_per_unit must be > 0.
-6. BUY list sorted by expected_profit_per_unit descending.
+5. BUY candidates: buy_trend_3d_vs_7d should be >= 0 (recovering, not still falling).
+6. BUY list sorted by buy_profit_per_unit descending.
 7. SELL candidates: qty must be > 0 (player owns the item).
-8. SELL candidates: latest_sell must be ABOVE hist_max_sell (current price must exceed the 30-day high). NEVER recommend selling items below their 30-day high.
+8. SELL candidates: latest_sell must be ABOVE hist_max_sell (at a new 30-day high).
 9. SELL candidates: total_sell_profit must be >= 1g (10000 copper).
-10. SELL list sorted by total_sell_profit descending.
+10. SELL candidates: avg_daily_bought must be >= 5 (enough demand to fill your listing).
+11. SELL list sorted by total_sell_profit descending.
 
-OUTPUT FORMAT — exactly two sections:
+OUTPUT FORMAT -- exactly two sections:
 
 ## Top 5 Buy Opportunities
-| # | Item | Buy Price | Avg Price | Expected Profit | Why |
-|---|------|-----------|-----------|-----------------|-----|
-Rank 1 = highest expected_profit_per_unit. The Item column MUST be a markdown
-link using the gw2tp_url: [Item Name](gw2tp_url). "Why" = 1-2 sentences citing:
-z-score, range position, trend direction, and daily volume.
+| # | Item | Buy Price | 30d High | Profit/Item | Sold/Day | Why |
+|---|------|-----------|----------|-------------|----------|-----|
+Rank 1 = highest buy_profit_per_unit. The Item column MUST be a markdown
+link using the gw2tp_url: [Item Name](gw2tp_url). "Why" = 1-2 sentences
+citing: discount from 30d high, trend direction, and volume.
 
 ## Top 5 Sell Opportunities
-| # | Item | Sell Price | 30d High | Qty | Total Profit | Why |
-|---|------|------------|----------|-----|-------------|-----|
+| # | Item | Sell Price | 30d High | Qty | Total Profit | Bought/Day | Why |
+|---|------|------------|----------|-----|-------------|------------|-----|
 Rank 1 = highest total_sell_profit. The Item column MUST be a markdown
-link using the gw2tp_url: [Item Name](gw2tp_url). "Why" = 1-2 sentences citing:
-how far above the 30d high the price is, trend direction, and daily volume.
+link using the gw2tp_url: [Item Name](gw2tp_url). "Why" = 1-2 sentences
+citing: how far above 30d high, trend direction, and volume.
 
 After both tables, add a "Market Context" paragraph (3 sentences max) with
 any relevant GW2 news from your search.
@@ -134,27 +132,32 @@ Do NOT recommend items that violate the rules above.
 
 def _build_ai_snapshot(df: pd.DataFrame) -> str:
     """Build CSV with swing trading signals for the AI."""
+    # Buy profit: what you'd make if you buy now and sell at the 30d high (after 15% tax)
+    df["buy_profit_per_unit"] = (
+        (df["hist_max_sell"] * 0.85 - df["latest_buy"])
+    ).clip(lower=0).astype(int)
+
+    # Buy discount: how far below the 30d high buy price
+    df["buy_discount_from_high_pct"] = (
+        (df["hist_max_buy"] - df["latest_buy"]) / df["hist_max_buy"].replace(0, pd.NA) * 100
+    ).round(1).fillna(0)
+
+    # Total gold from selling full stack at current sell price after 15% tax
+    df["total_sell_profit"] = (
+        df["latest_sell"] * 0.85 * df["current_count"]
+    ).astype(int)
+
     # Pre-filter: remove owned items where sell price is not above 30d high
     # (keeps non-owned items for buy candidates)
     is_owned = df["current_count"] > 0
     is_above_high = df["latest_sell"] > df["hist_max_sell"]
     df = df[~is_owned | is_above_high].copy()
 
-    # Total gold from selling all owned qty at current sell price after 15% tax
-    df["total_sell_profit"] = (
-        df["latest_sell"] * 0.85 * df["current_count"]
-    ).astype(int)
-
     # Format prices to g/s/c
-    price_cols = {
-        "latest_sell": "latest_sell",
-        "latest_buy": "latest_buy",
-        "avg_sell_30d": "avg_sell_30d",
-        "avg_buy_30d": "avg_buy_30d",
-        "expected_profit_per_unit": "expected_profit_per_unit",
-        "total_sell_profit": "total_sell_profit",
-        "hist_max_sell": "hist_max_sell",
-    }
+    price_cols = [
+        "latest_sell", "latest_buy", "hist_max_sell", "hist_max_buy",
+        "buy_profit_per_unit", "total_sell_profit",
+    ]
     formatted = df.copy()
     for col in price_cols:
         formatted[col] = formatted[col].apply(
@@ -169,21 +172,18 @@ def _build_ai_snapshot(df: pd.DataFrame) -> str:
         "qty": formatted["current_count"].astype(int),
         "latest_sell": formatted["latest_sell"],
         "latest_buy": formatted["latest_buy"],
-        "avg_sell_30d": formatted["avg_sell_30d"],
-        "avg_buy_30d": formatted["avg_buy_30d"],
+        "hist_max_sell": formatted["hist_max_sell"],
+        "hist_max_buy": formatted["hist_max_buy"],
+        "buy_discount_from_high_pct": df["buy_discount_from_high_pct"],
+        "buy_profit_per_unit": formatted["buy_profit_per_unit"],
         "buy_z_score": df["buy_z_score"],
         "sell_z_score": df["sell_z_score"],
-        "buy_range_pct": df["buy_range_pct"],
-        "sell_range_pct": df["sell_range_pct"],
         "buy_trend_3d_vs_7d": df["buy_trend_3d_vs_7d"],
         "sell_trend_3d_vs_7d": df["sell_trend_3d_vs_7d"],
-        "expected_profit_per_unit": formatted["expected_profit_per_unit"],
         "buy_volatility_pct": df["buy_volatility_pct"],
-        "sell_volatility_pct": df["sell_volatility_pct"],
         "avg_daily_sold": df["avg_daily_sold"],
         "avg_daily_bought": df["avg_daily_bought"],
         "total_sell_profit": formatted["total_sell_profit"],
-        "hist_max_sell": formatted["hist_max_sell"],
     })
 
     # Drop items with no name (unmatched joins)

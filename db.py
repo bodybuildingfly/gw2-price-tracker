@@ -227,3 +227,29 @@ def fetch_trading_signals() -> pd.DataFrame:
           FROM mv_trading_signals
         """
     )
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_promotion_prices() -> pd.DataFrame:
+    """
+    Return latest buy/sell prices and inventory counts for all items,
+    keyed by item_name. Used by the Mystic Forge promotion calculator.
+    """
+    return run_query(
+        """
+        SELECT i.item_name,
+               i.current_count,
+               lp.buy_price_copper,
+               lp.sell_price_copper
+          FROM gw2_items i
+          JOIN LATERAL (
+              SELECT buy_price_copper, sell_price_copper
+                FROM gw2_prices
+               WHERE item_id = i.item_id
+                 AND buy_price_copper > 0
+                 AND sell_price_copper > 0
+               ORDER BY recorded_at DESC
+               LIMIT 1
+          ) lp ON true
+        """
+    )
