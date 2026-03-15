@@ -18,6 +18,12 @@ from settings import get
 from pages.charts import render_price_chart
 
 
+def _gw2tp_url(item_id: int, item_name: str) -> str:
+    """Build a GW2TP item page URL from id and name."""
+    slug = re.sub(r'[^a-z0-9]+', '-', item_name.lower()).strip('-')
+    return f"https://www.gw2tp.com/item/{item_id}-{slug}"
+
+
 # ── Data helpers ─────────────────────────────────────────────────────
 
 def _load_data() -> pd.DataFrame:
@@ -71,6 +77,7 @@ STRATEGY: The player buys items when prices dip below normal, holds them,
 then sells when prices recover above average. This is NOT instant flipping.
 
 You will receive a market snapshot CSV. Key columns explained:
+- item_name / gw2tp_url: item name and its GW2TP price history page
 - latest_buy / latest_sell: current TP prices
 - avg_buy_30d / avg_sell_30d: 30-day average prices
 - buy_z_score: how many standard deviations BELOW average the buy price is
@@ -85,7 +92,8 @@ You will receive a market snapshot CSV. Key columns explained:
 - buy_volatility_pct / sell_volatility_pct: price swing range as % of average
   (higher = more profitable swings)
 - avg_daily_sold / avg_daily_bought: actual items traded per day (liquidity)
-- total_sell_profit: total gold profit if all owned qty sold at current price after tax
+- total_sell_profit: total gold received if all owned qty sold at current sell price after 15% tax
+- hist_max_sell: highest sell price in the past 30 days (excluding last 12 hours)
 
 STRICT RULES:
 1. The TP takes 15% tax on all sales.
@@ -95,7 +103,7 @@ STRICT RULES:
 5. BUY candidates: expected_profit_per_unit must be > 0.
 6. BUY list sorted by expected_profit_per_unit descending.
 7. SELL candidates: qty must be > 0 (player owns the item).
-8. SELL candidates: sell_z_score must be >= 0.5 (meaningfully above average).
+8. SELL candidates: latest_sell must be ABOVE hist_max_sell (current price must exceed the 30-day high). NEVER recommend selling items below their 30-day high.
 9. SELL candidates: total_sell_profit must be >= 1g (10000 copper).
 10. SELL list sorted by total_sell_profit descending.
 
@@ -104,14 +112,16 @@ OUTPUT FORMAT — exactly two sections:
 ## Top 5 Buy Opportunities
 | # | Item | Buy Price | Avg Price | Expected Profit | Why |
 |---|------|-----------|-----------|-----------------|-----|
-Rank 1 = highest expected_profit_per_unit. "Why" = 1-2 sentences citing:
+Rank 1 = highest expected_profit_per_unit. The Item column MUST be a markdown
+link using the gw2tp_url: [Item Name](gw2tp_url). "Why" = 1-2 sentences citing:
 z-score, range position, trend direction, and daily volume.
 
 ## Top 5 Sell Opportunities
-| # | Item | Sell Price | Qty | Total Profit | Why |
-|---|------|------------|-----|-------------|-----|
-Rank 1 = highest total_sell_profit. "Why" = 1-2 sentences citing:
-z-score, range position, trend direction, and daily volume.
+| # | Item | Sell Price | 30d High | Qty | Total Profit | Why |
+|---|------|------------|----------|-----|-------------|-----|
+Rank 1 = highest total_sell_profit. The Item column MUST be a markdown
+link using the gw2tp_url: [Item Name](gw2tp_url). "Why" = 1-2 sentences citing:
+how far above the 30d high the price is, trend direction, and daily volume.
 
 After both tables, add a "Market Context" paragraph (3 sentences max) with
 any relevant GW2 news from your search.
@@ -124,10 +134,16 @@ Do NOT recommend items that violate the rules above.
 
 def _build_ai_snapshot(df: pd.DataFrame) -> str:
     """Build CSV with swing trading signals for the AI."""
-    # Compute total sell profit for owned items
+    # Pre-filter: remove owned items where sell price is not above 30d high
+    # (keeps non-owned items for buy candidates)
+    is_owned = df["current_count"] > 0
+    is_above_high = df["latest_sell"] > df["hist_max_sell"]
+    df = df[~is_owned | is_above_high].copy()
+
+    # Total gold from selling all owned qty at current sell price after 15% tax
     df["total_sell_profit"] = (
-        (df["latest_sell"] * 0.85 - df["avg_buy_30d"]) * df["current_count"]
-    ).clip(lower=0).astype(int)
+        df["latest_sell"] * 0.85 * df["current_count"]
+    ).astype(int)
 
     # Format prices to g/s/c
     price_cols = {
@@ -137,6 +153,7 @@ def _build_ai_snapshot(df: pd.DataFrame) -> str:
         "avg_buy_30d": "avg_buy_30d",
         "expected_profit_per_unit": "expected_profit_per_unit",
         "total_sell_profit": "total_sell_profit",
+        "hist_max_sell": "hist_max_sell",
     }
     formatted = df.copy()
     for col in price_cols:
@@ -146,6 +163,9 @@ def _build_ai_snapshot(df: pd.DataFrame) -> str:
 
     out = pd.DataFrame({
         "item_name": formatted["item_name"],
+        "gw2tp_url": df.apply(
+            lambda r: _gw2tp_url(int(r["item_id"]), r["item_name"]), axis=1
+        ),
         "qty": formatted["current_count"].astype(int),
         "latest_sell": formatted["latest_sell"],
         "latest_buy": formatted["latest_buy"],
@@ -163,6 +183,7 @@ def _build_ai_snapshot(df: pd.DataFrame) -> str:
         "avg_daily_sold": df["avg_daily_sold"],
         "avg_daily_bought": df["avg_daily_bought"],
         "total_sell_profit": formatted["total_sell_profit"],
+        "hist_max_sell": formatted["hist_max_sell"],
     })
 
     # Drop items with no name (unmatched joins)
@@ -243,12 +264,22 @@ def _call_gemini(api_key: str, snapshot_csv: str) -> str:
 
 
 def _parse_item_names(analysis: str) -> list[str]:
-    """Extract item names from markdown table rows in the AI response."""
-    # Match table rows: | number | item name | ...
+    """Extract item names from markdown table rows in the AI response.
+    Handles both plain text and markdown links like [Name](url)."""
+    # Match table rows: | number | item cell | ...
     pattern = r'\|\s*\d+\s*\|\s*([^|]+?)\s*\|'
     matches = re.findall(pattern, analysis)
-    # Filter out header-like matches
-    names = [m.strip() for m in matches if m.strip() and m.strip() != "Item"]
+    names = []
+    for m in matches:
+        m = m.strip()
+        if not m or m == "Item":
+            continue
+        # Extract name from markdown link [Name](url)
+        link_match = re.match(r'\[([^\]]+)\]', m)
+        if link_match:
+            names.append(link_match.group(1).strip())
+        else:
+            names.append(m)
     return names
 
 

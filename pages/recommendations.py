@@ -1,8 +1,8 @@
 """
 Page 3 — Recommendations
 Top 5 BUY / SELL opportunities based on 30-day price breakouts.
-Buy = current sell price below historical 30d floor (excl. last 24h).
-Sell = current buy price above historical 30d ceiling (excl. last 24h).
+Buy = current sell price below historical 30d floor (excl. last 12h).
+Sell = current buy price above historical 30d ceiling (excl. last 12h).
 """
 
 import streamlit as st
@@ -47,7 +47,7 @@ def _load_data() -> pd.DataFrame:
 
 
 def _get_buy_candidates(df: pd.DataFrame) -> pd.DataFrame:
-    """Items selling below their 30d historical floor (excl. last 24h)."""
+    """Items selling below their 30d historical floor (excl. last 12h)."""
     df = df[
         (df["hist_min_sell"] > 0)
         & (df["latest_sell"] < df["hist_min_sell"])
@@ -62,7 +62,7 @@ def _get_buy_candidates(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _get_sell_candidates(df: pd.DataFrame) -> pd.DataFrame:
-    """Owned items buying above their 30d historical ceiling (excl. last 24h)."""
+    """Owned items buying above their 30d historical ceiling (excl. last 12h)."""
     df = df[
         (df["current_count"] > 0)
         & (df["hist_max_buy"] > 0)
@@ -133,7 +133,7 @@ def page_recommendations() -> None:
     st.subheader("📈 Buy — Below 30-Day Floor")
     st.caption(
         "Items currently selling below the lowest price seen in the past 30 days "
-        "(excluding the last 24 hours). Ranked by % below floor."
+        "(excluding the last 12 hours). Ranked by % below floor."
     )
     if buy_df.empty:
         st.info("No items currently selling below their 30-day historical floor.")
@@ -143,7 +143,7 @@ def page_recommendations() -> None:
     st.subheader("💰 Sell — Above 30-Day Ceiling")
     st.caption(
         "Items you own with buy orders above the highest price seen in the past "
-        "30 days (excluding the last 24 hours). Ranked by % above ceiling."
+        "30 days (excluding the last 12 hours). Ranked by % above ceiling."
     )
     if sell_df.empty:
         st.info("No owned items currently buying above their 30-day historical ceiling.")
