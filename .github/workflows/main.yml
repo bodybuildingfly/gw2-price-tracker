@@ -1,0 +1,17 @@
+name: Call Webhook after new release
+
+on:
+  release:
+    types:
+      - published # This ensures the workflow only runs when the release is published, not drafted or updated
+
+jobs:
+  call-webhook-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call external webhook
+        # Use a curl command to send the POST request to your target URL
+        run: |
+          curl -X POST ${{ secrets.WEBHOOK_URL }} \
+          -H "Content-Type: application/json" \
+          -d '{"release_tag": "${{ github.event.release.tag_name }}", "repository": "${{ github.repository }}"}'
