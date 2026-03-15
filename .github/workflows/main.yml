@@ -2,8 +2,7 @@ name: Call Webhook after new release
 
 on:
   release:
-    types:
-      - published # This ensures the workflow only runs when the release is published, not drafted or updated
+    types: [created] # Triggers only when a new release is published
 
 jobs:
   call-webhook-job:
