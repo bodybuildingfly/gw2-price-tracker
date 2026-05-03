@@ -96,7 +96,7 @@ def _render_buy_expanders(df: pd.DataFrame) -> None:
             c2.metric("30d Floor", format_gsc(int(row["hist_min_sell"])))
             c3.metric("30d Avg Sell", format_gsc(int(row["avg_sell_30d"])))
             c4.metric("Sold/Day", f"{int(row['avg_daily_sold']):,}")
-            render_price_chart(int(row["item_id"]), row["item_name"])
+            render_price_chart(int(row["item_id"]), row["item_name"], key_suffix="_buy")
 
 
 def _render_sell_expanders(df: pd.DataFrame) -> None:
@@ -115,7 +115,7 @@ def _render_sell_expanders(df: pd.DataFrame) -> None:
             c2.metric("30d Ceiling", format_gsc(int(row["hist_max_buy"])))
             c3.metric("30d Avg Buy", format_gsc(int(row["avg_buy_30d"])))
             c4.metric("Bought/Day", f"{int(row['avg_daily_bought']):,}")
-            render_price_chart(int(row["item_id"]), row["item_name"])
+            render_price_chart(int(row["item_id"]), row["item_name"], key_suffix="_sell")
 
 
 def page_recommendations() -> None:
@@ -203,7 +203,7 @@ def _render_sleeping_giants() -> None:
             c2.metric("Sell Price", format_gsc(int(row["latest_sell"])))
             c3.metric("3d Trend", f"{row['buy_trend_3d_vs_7d']:+.1f}%")
             c4.metric("Volatility", f"{row['buy_volatility_pct']:.1f}%")
-            render_price_chart(int(row["item_id"]), row["item_name"])
+            render_price_chart(int(row["item_id"]), row["item_name"], key_suffix="_giant")
 
 
 # ── Weekend Volatility ────────────────────────────────────────────────

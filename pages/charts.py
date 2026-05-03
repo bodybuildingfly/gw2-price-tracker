@@ -38,7 +38,7 @@ def _localize(df: pd.DataFrame, tz_name: str) -> pd.DataFrame:
     return df
 
 
-def render_price_chart(item_id: int, item_name: str, height: int = 300) -> None:
+def render_price_chart(item_id: int, item_name: str, height: int = 300, key_suffix: str = "") -> None:
     """Render a compact 30-day price history chart for one item."""
     try:
         price_df = fetch_price_history(item_id)
@@ -97,4 +97,4 @@ def render_price_chart(item_id: int, item_name: str, height: int = 300) -> None:
         margin=dict(l=10, r=10, t=10, b=10),
         hovermode="x unified",
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, width="stretch", key=f"price_chart_{item_id}{key_suffix}")
