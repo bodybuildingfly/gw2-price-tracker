@@ -15,7 +15,7 @@ st.set_page_config(
 # ── Import page functions (each has a unique name) ───────────────────
 from pages.dashboard import page_dashboard
 from pages.item_analysis import page_item_analysis
-from pages.recommendations import page_recommendations
+from pages.recommendations import page_recommendations_full
 from pages.ai_recs import page_ai_recommendations
 from pages.mystic_forge import page_mystic_forge
 from pages.settings_page import page_settings
@@ -24,7 +24,7 @@ from pages.settings_page import page_settings
 pages = [
     st.Page(page_dashboard, title="Dashboard", icon="🏠", default=True),
     st.Page(page_item_analysis, title="Item Analysis", icon="📊"),
-    st.Page(page_recommendations, title="Recommendations", icon="📋"),
+    st.Page(page_recommendations_full, title="Recommendations", icon="📋"),
     st.Page(page_ai_recommendations, title="AI Recommendations", icon="🤖"),
     st.Page(page_mystic_forge, title="Mystic Forge", icon="🔮"),
     st.Page(page_settings, title="Settings", icon="⚙️"),

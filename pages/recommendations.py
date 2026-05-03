@@ -1,13 +1,17 @@
 """
 Page 3 — Recommendations
-Top 5 BUY / SELL opportunities based on 30-day price breakouts.
-Buy = current sell price below historical 30d floor (excl. last 12h).
-Sell = current buy price above historical 30d ceiling (excl. last 12h).
+Trading opportunities across three strategies:
+- Price Breakouts (30d floor/ceiling)
+- Sleeping Giants (high margin + high volume + dip recovery)
+- Weekend Volatility (day-of-week price patterns)
 """
 
 import streamlit as st
 import pandas as pd
-from db import fetch_trading_signals, fetch_daily_volumes, fetch_item_list
+from datetime import datetime
+import pytz
+from db import (fetch_trading_signals, fetch_daily_volumes, fetch_item_list,
+                fetch_sleeping_giants, fetch_dow_patterns)
 from currency import format_gsc
 from pages.charts import render_price_chart
 
@@ -149,3 +153,170 @@ def page_recommendations() -> None:
         st.info("No owned items currently buying above their 30-day historical ceiling.")
     else:
         _render_sell_expanders(sell_df)
+
+
+# ── Sleeping Giants ───────────────────────────────────────────────────
+
+def _render_sleeping_giants() -> None:
+    """Items with 20%+ margin, 100+ daily volume, currently in a dip."""
+    st.subheader("💤 Sleeping Giants")
+    st.caption(
+        "Items with a 20%+ flip margin and 100+ units sold per day, currently "
+        "trading in a price dip with signs of recovery. These are the highest "
+        "conviction swing trades — high margin AND high liquidity."
+    )
+
+    try:
+        df = fetch_sleeping_giants()
+    except Exception as exc:
+        st.error(f"Could not load Sleeping Giants data: {exc}")
+        return
+
+    if df.empty:
+        st.info("No Sleeping Giants found at current prices. Check back when the market dips.")
+        return
+
+    # Cast numerics
+    for col in ["latest_sell", "latest_buy", "avg_sell_30d", "avg_buy_30d",
+                "hist_max_sell", "buy_z_score", "buy_trend_3d_vs_7d",
+                "buy_volatility_pct", "avg_daily_sold", "margin_pct", "current_count"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    df["profit_per_unit"] = (
+        (df["latest_sell"] * 0.85 - df["latest_buy"]).clip(lower=0).astype(int)
+    )
+
+    df = df.sort_values("margin_pct", ascending=False).head(10)
+
+    for _, row in df.iterrows():
+        label = (
+            f"**{row['item_name']}** — "
+            f"Margin: **{row['margin_pct']:.1f}%** · "
+            f"Profit: {format_gsc(int(row['profit_per_unit']))} · "
+            f"Sold/Day: {int(row['avg_daily_sold']):,} · "
+            f"Z-Score: {row['buy_z_score']:.1f}"
+        )
+        with st.expander(label):
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Buy Price", format_gsc(int(row["latest_buy"])))
+            c2.metric("Sell Price", format_gsc(int(row["latest_sell"])))
+            c3.metric("3d Trend", f"{row['buy_trend_3d_vs_7d']:+.1f}%")
+            c4.metric("Volatility", f"{row['buy_volatility_pct']:.1f}%")
+            render_price_chart(int(row["item_id"]), row["item_name"])
+
+
+# ── Weekend Volatility ────────────────────────────────────────────────
+
+_DOW_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday",
+              "Thursday", "Friday", "Saturday"]
+
+_WEEKEND_DAYS = {5, 6}    # Friday, Saturday
+_WEEKDAY_DAYS = {2, 3, 4}  # Tuesday, Wednesday, Thursday
+
+
+def _render_weekend_volatility() -> None:
+    """Items with meaningful day-of-week price cyclicality."""
+    st.subheader("📅 Weekend Volatility")
+    st.caption(
+        "Items whose prices cycle predictably by day of week. "
+        "Weekend columns show typical Friday/Saturday prices vs "
+        "Tuesday–Thursday. A large gap means a reliable buy-low/sell-high rhythm."
+    )
+
+    try:
+        dow_df = fetch_dow_patterns()
+        items_df = fetch_item_list()
+    except Exception as exc:
+        st.error(f"Could not load day-of-week data: {exc}")
+        return
+
+    if dow_df.empty:
+        st.info("Not enough data yet for day-of-week analysis. Check back after a few more weeks.")
+        return
+
+    for col in ["avg_sell", "stddev_sell", "avg_buy", "stddev_buy", "day_of_week"]:
+        dow_df[col] = pd.to_numeric(dow_df[col], errors="coerce").fillna(0)
+
+    # Pivot to wide format: one row per item, one column per DOW
+    pivot = dow_df.pivot(index="item_id", columns="day_of_week", values="avg_buy")
+    pivot.columns = [_DOW_NAMES[c] for c in pivot.columns]
+
+    # Weekend avg (Fri/Sat) vs weekday avg (Tue/Wed/Thu)
+    weekend_cols = [_DOW_NAMES[d] for d in _WEEKEND_DAYS if _DOW_NAMES[d] in pivot.columns]
+    weekday_cols = [_DOW_NAMES[d] for d in _WEEKDAY_DAYS if _DOW_NAMES[d] in pivot.columns]
+
+    if not weekend_cols or not weekday_cols:
+        st.info("Insufficient day-of-week coverage yet.")
+        return
+
+    pivot["weekend_avg"] = pivot[weekend_cols].mean(axis=1)
+    pivot["weekday_avg"] = pivot[weekday_cols].mean(axis=1)
+
+    # Items that dip on weekends: weekend price notably below weekday price
+    pivot["dip_pct"] = (
+        (pivot["weekday_avg"] - pivot["weekend_avg"])
+        / pivot["weekday_avg"].replace(0, pd.NA) * 100
+    ).round(1)
+
+    pivot = pivot[pivot["dip_pct"] >= 5].copy()  # at least 5% cheaper on weekends
+
+    if pivot.empty:
+        st.info("No strong day-of-week patterns detected yet. More data needed.")
+        return
+
+    pivot = pivot.merge(
+        items_df[["item_id", "item_name", "current_count"]],
+        left_index=True, right_on="item_id", how="left"
+    ).dropna(subset=["item_name"])
+
+    # Show today's position
+    from settings import get
+    try:
+        tz = pytz.timezone(get("timezone"))
+    except Exception:
+        tz = pytz.UTC
+    today_dow = datetime.now(tz).weekday()  # 0=Monday in Python
+    # Convert Python DOW (0=Mon) to GW2 DOW (0=Sun)
+    today_dow_name = _DOW_NAMES[(today_dow + 1) % 7]
+
+    st.caption(f"Today is **{today_dow_name}**. "
+               f"Weekend days (Fri/Sat) tend to be cheapest for these items.")
+
+    pivot = pivot.sort_values("dip_pct", ascending=False).head(15)
+
+    rows = []
+    for _, row in pivot.iterrows():
+        rows.append({
+            "Item": row["item_name"],
+            "Weekend Avg": format_gsc(int(row["weekend_avg"])),
+            "Weekday Avg": format_gsc(int(row["weekday_avg"])),
+            "Weekend Dip": f"{row['dip_pct']:.1f}%",
+            "Best Day to Buy": min(
+                weekend_cols,
+                key=lambda d: row.get(d, float("inf"))
+            ),
+            "Best Day to Sell": max(
+                weekday_cols,
+                key=lambda d: row.get(d, 0)
+            ),
+        })
+
+    st.dataframe(
+        pd.DataFrame(rows),
+        hide_index=True,
+        width="stretch",
+    )
+
+
+# ── Page ─────────────────────────────────────────────────────────────
+
+def page_recommendations_full() -> None:
+    """Wrap the full recommendations page with all strategies."""
+    page_recommendations()
+
+    st.divider()
+    _render_sleeping_giants()
+
+    st.divider()
+    _render_weekend_volatility()

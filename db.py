@@ -253,3 +253,65 @@ def fetch_promotion_prices() -> pd.DataFrame:
           ) lp ON true
         """
     )
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_dow_patterns() -> pd.DataFrame:
+    """Return per-day-of-week price averages and stddev for all items."""
+    return run_query(
+        """
+        SELECT item_id,
+               day_of_week,
+               avg_sell,
+               stddev_sell,
+               avg_buy,
+               stddev_buy,
+               data_points
+          FROM mv_dow_patterns
+        """
+    )
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_sleeping_giants() -> pd.DataFrame:
+    """
+    Return items with high flip margin + high daily volume + in a price dip.
+    Computed from existing views -- no extra SQL needed.
+    """
+    return run_query(
+        """
+        SELECT ts.item_id,
+               i.item_name,
+               i.current_count,
+               ts.latest_sell,
+               ts.latest_buy,
+               ts.avg_sell_30d,
+               ts.avg_buy_30d,
+               ts.hist_max_sell,
+               ts.hist_min_buy,
+               ts.buy_z_score,
+               ts.buy_trend_3d_vs_7d,
+               ts.buy_volatility_pct,
+               ts.sell_volatility_pct,
+               COALESCE(dv.avg_daily_sold, 0)   AS avg_daily_sold,
+               COALESCE(dv.avg_daily_bought, 0) AS avg_daily_bought,
+               ROUND(((ts.latest_sell * 0.85 - ts.latest_buy)::NUMERIC
+                      / NULLIF(ts.latest_buy, 0)) * 100, 1) AS margin_pct
+          FROM mv_trading_signals ts
+          JOIN gw2_items i USING (item_id)
+          LEFT JOIN (
+              SELECT item_id,
+                     AVG(items_sold)   AS avg_daily_sold,
+                     AVG(items_bought) AS avg_daily_bought
+                FROM mv_daily_volumes
+               GROUP BY item_id
+          ) dv USING (item_id)
+         WHERE ts.latest_buy  > 0
+           AND ts.latest_sell > 0
+           AND ((ts.latest_sell * 0.85 - ts.latest_buy)::NUMERIC
+                / NULLIF(ts.latest_buy, 0)) * 100 >= 20
+           AND COALESCE(dv.avg_daily_sold, 0) >= 100
+           AND ts.buy_z_score <= -0.5
+           AND ts.buy_trend_3d_vs_7d >= 0
+        """
+    )
