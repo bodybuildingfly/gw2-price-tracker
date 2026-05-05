@@ -315,3 +315,30 @@ def fetch_sleeping_giants() -> pd.DataFrame:
            AND ts.buy_trend_3d_vs_7d >= 0
         """
     )
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_owned_item_history() -> pd.DataFrame:
+    """
+    Return 7-day per-day price history (min/avg/max) for items
+    the player owns. Used to give the AI price shape context.
+    """
+    return run_query(
+        """
+        SELECT p.item_id,
+               DATE_TRUNC('day', p.recorded_at)::DATE AS price_date,
+               MIN(p.sell_price_copper)::INTEGER       AS min_sell,
+               AVG(p.sell_price_copper)::INTEGER       AS avg_sell,
+               MAX(p.sell_price_copper)::INTEGER       AS max_sell,
+               MIN(p.buy_price_copper)::INTEGER        AS min_buy,
+               AVG(p.buy_price_copper)::INTEGER        AS avg_buy,
+               MAX(p.buy_price_copper)::INTEGER        AS max_buy
+          FROM gw2_prices p
+          JOIN gw2_items i USING (item_id)
+         WHERE p.recorded_at >= NOW() - INTERVAL '7 days'
+           AND i.current_count > 0
+           AND p.sell_price_copper > 0
+         GROUP BY p.item_id, DATE_TRUNC('day', p.recorded_at)::DATE
+         ORDER BY p.item_id, price_date
+        """
+    )
