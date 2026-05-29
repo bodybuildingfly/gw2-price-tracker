@@ -11,7 +11,7 @@ import pandas as pd
 from datetime import datetime
 import pytz
 from db import (fetch_trading_signals, fetch_daily_volumes, fetch_item_list,
-                fetch_sleeping_giants, fetch_dow_patterns)
+                fetch_sleeping_giants, fetch_dow_patterns, fetch_price_history_batch)
 from currency import format_gsc
 from pages.charts import render_price_chart
 
@@ -83,7 +83,21 @@ def _get_sell_candidates(df: pd.DataFrame) -> pd.DataFrame:
 
 def _render_buy_expanders(df: pd.DataFrame) -> None:
     """Render expandable rows for buy candidates with charts."""
+
+    # Pre-fetch all chart data to avoid N+1 query problem
+    item_ids = tuple(df["item_id"].astype(int).tolist())
+    try:
+        batch_price_df = fetch_price_history_batch(item_ids)
+    except Exception:
+        batch_price_df = pd.DataFrame()
+
     for _, row in df.iterrows():
+        item_id = int(row["item_id"])
+        if not batch_price_df.empty and "item_id" in batch_price_df.columns:
+            item_price_df = batch_price_df[batch_price_df["item_id"] == item_id]
+        else:
+            item_price_df = None
+
         label = (
             f"**{row['item_name']}** — "
             f"Sell: {format_gsc(int(row['latest_sell']))} · "
@@ -96,12 +110,26 @@ def _render_buy_expanders(df: pd.DataFrame) -> None:
             c2.metric("30d Floor", format_gsc(int(row["hist_min_sell"])))
             c3.metric("30d Avg Sell", format_gsc(int(row["avg_sell_30d"])))
             c4.metric("Sold/Day", f"{int(row['avg_daily_sold']):,}")
-            render_price_chart(int(row["item_id"]), row["item_name"], key_suffix="_buy")
+            render_price_chart(item_id, row["item_name"], key_suffix="_buy", price_df=item_price_df)
 
 
 def _render_sell_expanders(df: pd.DataFrame) -> None:
     """Render expandable rows for sell candidates with charts."""
+
+    # Pre-fetch all chart data to avoid N+1 query problem
+    item_ids = tuple(df["item_id"].astype(int).tolist())
+    try:
+        batch_price_df = fetch_price_history_batch(item_ids)
+    except Exception:
+        batch_price_df = pd.DataFrame()
+
     for _, row in df.iterrows():
+        item_id = int(row["item_id"])
+        if not batch_price_df.empty and "item_id" in batch_price_df.columns:
+            item_price_df = batch_price_df[batch_price_df["item_id"] == item_id]
+        else:
+            item_price_df = None
+
         label = (
             f"**{row['item_name']}** — "
             f"Buy: {format_gsc(int(row['latest_buy']))} · "
@@ -115,7 +143,7 @@ def _render_sell_expanders(df: pd.DataFrame) -> None:
             c2.metric("30d Ceiling", format_gsc(int(row["hist_max_buy"])))
             c3.metric("30d Avg Buy", format_gsc(int(row["avg_buy_30d"])))
             c4.metric("Bought/Day", f"{int(row['avg_daily_bought']):,}")
-            render_price_chart(int(row["item_id"]), row["item_name"], key_suffix="_sell")
+            render_price_chart(item_id, row["item_name"], key_suffix="_sell", price_df=item_price_df)
 
 
 def page_recommendations() -> None:
@@ -189,7 +217,20 @@ def _render_sleeping_giants() -> None:
 
     df = df.sort_values("margin_pct", ascending=False).head(10)
 
+    # Pre-fetch all chart data to avoid N+1 query problem
+    item_ids = tuple(df["item_id"].astype(int).tolist())
+    try:
+        batch_price_df = fetch_price_history_batch(item_ids)
+    except Exception:
+        batch_price_df = pd.DataFrame()
+
     for _, row in df.iterrows():
+        item_id = int(row["item_id"])
+        if not batch_price_df.empty and "item_id" in batch_price_df.columns:
+            item_price_df = batch_price_df[batch_price_df["item_id"] == item_id]
+        else:
+            item_price_df = None
+
         label = (
             f"**{row['item_name']}** — "
             f"Margin: **{row['margin_pct']:.1f}%** · "
@@ -203,7 +244,7 @@ def _render_sleeping_giants() -> None:
             c2.metric("Sell Price", format_gsc(int(row["latest_sell"])))
             c3.metric("3d Trend", f"{row['buy_trend_3d_vs_7d']:+.1f}%")
             c4.metric("Volatility", f"{row['buy_volatility_pct']:.1f}%")
-            render_price_chart(int(row["item_id"]), row["item_name"], key_suffix="_giant")
+            render_price_chart(item_id, row["item_name"], key_suffix="_giant", price_df=item_price_df)
 
 
 # ── Weekend Volatility ────────────────────────────────────────────────
