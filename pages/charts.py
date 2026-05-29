@@ -38,10 +38,15 @@ def _localize(df: pd.DataFrame, tz_name: str) -> pd.DataFrame:
     return df
 
 
-def render_price_chart(item_id: int, item_name: str, height: int = 300, key_suffix: str = "") -> None:
+def render_price_chart(item_id: int, item_name: str, height: int = 300, key_suffix: str = "", price_df: pd.DataFrame | None = None) -> None:
     """Render a compact 30-day price history chart for one item."""
     try:
-        price_df = fetch_price_history(item_id)
+        if price_df is None:
+            price_df = fetch_price_history(item_id)
+        else:
+            # We must make a copy before modifying the dataframe to prevent SettingWithCopyWarning
+            # if the price_df is just a slice from the batched query
+            price_df = price_df.copy()
     except Exception:
         st.caption(f"Could not load price history for {item_name}.")
         return

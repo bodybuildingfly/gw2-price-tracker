@@ -98,6 +98,28 @@ def fetch_price_history(item_id: int) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def fetch_price_history_batch(item_ids: tuple[int]) -> pd.DataFrame:
+    """Return raw 3-hour price/volume rows for multiple items."""
+    if not item_ids:
+        return pd.DataFrame()
+    # Using tuple to make it hashable for st.cache_data
+    return run_query(
+        """
+        SELECT item_id,
+               sell_price_copper,
+               buy_price_copper,
+               sell_quantity,
+               buy_quantity,
+               recorded_at
+          FROM gw2_prices
+         WHERE item_id = ANY(:item_ids)
+         ORDER BY item_id, recorded_at
+        """,
+        {"item_ids": list(item_ids)},
+    )
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_volumes() -> pd.DataFrame:
     """Return the most recent sell_quantity and buy_quantity per item."""
     return run_query(
