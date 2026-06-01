@@ -15,7 +15,9 @@ def page_dashboard() -> None:
     try:
         df = fetch_opportunities()
     except Exception as exc:
-        st.error(f"Failed to load data from the database: {exc}")
+        import traceback
+        traceback.print_exc()
+        st.error("Failed to load data from the database. Check server logs.")
         return
 
     if df.empty:

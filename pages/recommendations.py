@@ -152,7 +152,9 @@ def page_recommendations() -> None:
     try:
         df = _load_data()
     except Exception as exc:
-        st.error(f"Failed to load data from the database: {exc}")
+        import traceback
+        traceback.print_exc()
+        st.error("Failed to load data from the database. Check server logs.")
         return
 
     if df.empty:
@@ -197,7 +199,9 @@ def _render_sleeping_giants() -> None:
     try:
         df = fetch_sleeping_giants()
     except Exception as exc:
-        st.error(f"Could not load Sleeping Giants data: {exc}")
+        import traceback
+        traceback.print_exc()
+        st.error("Could not load Sleeping Giants data. Check server logs.")
         return
 
     if df.empty:
@@ -269,7 +273,9 @@ def _render_weekend_volatility() -> None:
         dow_df = fetch_dow_patterns()
         items_df = fetch_item_list()
     except Exception as exc:
-        st.error(f"Could not load day-of-week data: {exc}")
+        import traceback
+        traceback.print_exc()
+        st.error("Could not load day-of-week data. Check server logs.")
         return
 
     if dow_df.empty:
