@@ -18,7 +18,9 @@ def page_item_analysis() -> None:
     try:
         items_df = fetch_item_list()
     except Exception as exc:
-        st.error(f"Could not load items: {exc}")
+        import traceback
+        traceback.print_exc()
+        st.error("Could not load items. Check server logs.")
         return
 
     if items_df.empty:
@@ -50,7 +52,9 @@ def page_item_analysis() -> None:
     try:
         price_df = fetch_price_history(item_id)
     except Exception as exc:
-        st.error(f"Could not load price history: {exc}")
+        import traceback
+        traceback.print_exc()
+        st.error("Could not load price history. Check server logs.")
         return
 
     if price_df.empty:

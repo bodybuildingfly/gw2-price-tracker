@@ -19,7 +19,9 @@ def page_mystic_forge() -> None:
     try:
         promo_df = fetch_promotion_prices()
     except Exception as exc:
-        st.error(f"Failed to load price data: {exc}")
+        import traceback
+        traceback.print_exc()
+        st.error("Failed to load price data. Check server logs.")
         return
 
     prices = {

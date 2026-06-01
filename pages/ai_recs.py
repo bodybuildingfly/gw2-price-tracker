@@ -411,7 +411,7 @@ def page_ai_recommendations() -> None:
             except Exception as exc:
                 import traceback
                 traceback.print_exc()
-                st.error(f"Database error: {exc}")
+                st.error("Database error. Check server logs.")
                 return
 
             if ctx["df"].empty:
@@ -438,7 +438,7 @@ def page_ai_recommendations() -> None:
             except Exception as exc:
                 import traceback
                 traceback.print_exc()
-                st.error(f"Gemini API error: {exc}")
+                st.error("Gemini API error. Check server logs.")
 
     if "ai_analysis" in st.session_state:
         st.divider()
