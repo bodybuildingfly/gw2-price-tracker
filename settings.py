@@ -21,6 +21,7 @@ def _ensure_file() -> None:
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not SETTINGS_PATH.exists():
         SETTINGS_PATH.write_text(json.dumps(_DEFAULTS, indent=2))
+        SETTINGS_PATH.chmod(0o600)
 
 
 def load_settings() -> dict[str, Any]:
@@ -40,6 +41,7 @@ def save_settings(data: dict[str, Any]) -> None:
     """Persist the settings dict to disk."""
     _ensure_file()
     SETTINGS_PATH.write_text(json.dumps(data, indent=2))
+    SETTINGS_PATH.chmod(0o600)
 
 
 def get(key: str) -> Any:
