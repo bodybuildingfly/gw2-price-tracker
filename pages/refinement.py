@@ -1,3 +1,7 @@
+import streamlit as st
+import pandas as pd
+from db import fetch_promotion_prices
+from currency import format_gsc
 """
 Crafting station refinement recipes and profit calculator.
 
@@ -98,3 +102,89 @@ def calculate_refinement(prices: dict, inventory: dict) -> list[dict]:
 
     results.sort(key=lambda r: r["profit"], reverse=True)
     return results
+
+def style_profit(val):
+    if isinstance(val, str) and (val.startswith("-") or val == "0c"):
+        return "color: red;"
+    elif isinstance(val, str) and not val.startswith("-"):
+        return "color: green;"
+    return ""
+
+def page_refinements() -> None:
+    st.header("Refinements")
+    st.caption(
+        "Profit from refining raw materials at a crafting station (no Spirit Shards). "
+        "Formula: Revenue = refined_sell x 0.85 (TP tax). "
+        "Cost = 2 x raw_buy. Sorted by profit per craft. "
+        "Strategy assumes purchasing raw materials via buy orders and selling refined via sell orders."
+    )
+
+    try:
+        promo_df = fetch_promotion_prices()
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        st.error("Failed to load price data. Check server logs.")
+        return
+
+    prices = {
+        row["item_name"]: (int(row["buy_price_copper"]), int(row["sell_price_copper"]))
+        for _, row in promo_df.iterrows()
+    }
+    inventory = {
+        row["item_name"]: int(row["current_count"])
+        for _, row in promo_df.iterrows()
+    }
+
+    ref_results = calculate_refinement(prices, inventory)
+
+    if not ref_results:
+        st.info("Could not calculate refinement profits -- price data may be missing.")
+        return
+
+    # Category filter
+    categories = sorted({r["category"] for r in ref_results})
+    if categories:
+        selected_cats = st.multiselect(
+            "Filter by material type",
+            options=categories,
+            default=categories,
+        )
+        ref_results = [r for r in ref_results if r["category"] in selected_cats]
+
+    if ref_results:
+        rows = []
+        for r in ref_results:
+            rows.append({
+                "Recipe":       r["name"],
+                "Tier":         r["tier"],
+                "Raw Material": r["raw_name"],
+                "Raw Buy Price": format_gsc(r["raw_buy"]),
+                "Refined Material": r["refined_name"],
+                "Refined Sell Price": format_gsc(r["refined_sell"]),
+                "Cost":         format_gsc(r["cost"]),
+                "Revenue":      format_gsc(r["revenue"]),
+                "Profit":       format_gsc(r["profit"]),
+                "Profit %":     f"{r['profit_pct']:.1f}%",
+            })
+
+        df = pd.DataFrame(rows)
+
+        # Apply color coding to Profit column
+        st.dataframe(
+            df.style.map(style_profit, subset=['Profit']),
+            hide_index=True,
+            width="stretch"
+        )
+    else:
+        st.info("No refinements available for selected filters.")
+
+    with st.expander("How this works"):
+        st.markdown(
+            "All recipes use a simple 2:1 ratio at a crafting station:\n"
+            "- 2 raw material -> 1 refined material (no additional cost)\n\n"
+            "**Profit** = (refined sell price x 0.85) - (2 x raw buy price)\n\n"
+            "**When to buy inputs:** If profit is positive, place buy orders for the raw material and sell orders for the "
+            "refined output once crafted.\n\n"
+            "Alloy ingots (Bronze, Steel, Darksteel) require vendor lumps and are excluded."
+        )

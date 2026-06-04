@@ -19,6 +19,7 @@ from pages.recommendations import page_recommendations_full
 from pages.ai_recs import page_ai_recommendations
 from pages.mystic_forge import page_mystic_forge
 from pages.settings_page import page_settings
+from pages.refinement import page_refinements
 
 # ── Define pages ─────────────────────────────────────────────────────
 pages = [
@@ -27,6 +28,7 @@ pages = [
     st.Page(page_recommendations_full, title="Recommendations", icon="📋"),
     st.Page(page_ai_recommendations, title="AI Recommendations", icon="🤖"),
     st.Page(page_mystic_forge, title="Mystic Forge", icon="🔮"),
+    st.Page(page_refinements, title="Refinements", icon="⚒️"),
     st.Page(page_settings, title="Settings", icon="⚙️"),
 ]
 
