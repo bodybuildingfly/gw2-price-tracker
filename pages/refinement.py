@@ -9,7 +9,7 @@ All refinement is done at a crafting station at no additional cost
 (no Spirit Shards, no vendor materials for simple 2:1 recipes).
 
 Simple rule: 2 raw material -> 1 refined material
-Profit = (refined_sell * 0.85) - (2 * raw_buy)
+Profit = (refined_sell * 0.85) - (raw_qty * raw_buy)
 
 Alloy ingots (Bronze, Steel, Darksteel) require vendor lumps (not on TP)
 and are excluded.
@@ -17,36 +17,38 @@ and are excluded.
 
 # (recipe_name, raw_item_name, raw_qty, refined_item_name, tier, category)
 REFINEMENT_RECIPES = [
-    # Metals -- simple 2:1 ore -> ingot
+    # Metals (Basic)
     ("Copper Refine",       "Copper Ore",     2, "Copper Ingot",         1, "Metal"),
-    ("Iron Refine",         "Iron Ore",       2, "Iron Ingot",           2, "Metal"),
-    ("Platinum Refine",     "Platinum Ore",   2, "Platinum Ingot",       3, "Metal"),
+    ("Silver Refine",       "Silver Ore",     2, "Silver Ingot",         2, "Metal"),
+    ("Iron Refine",         "Iron Ore",       3, "Iron Ingot",           2, "Metal"),
+    ("Gold Refine",         "Gold Ore",       2, "Gold Ingot",           3, "Metal"),
+    ("Platinum Refine",     "Platinum Ore",   2, "Platinum Ingot",       4, "Metal"),
     ("Mithril Refine",      "Mithril Ore",    2, "Mithril Ingot",        5, "Metal"),
     ("Orichalcum Refine",   "Orichalcum Ore", 2, "Orichalcum Ingot",     6, "Metal"),
 
-    # Wood -- 2 log -> 1 plank
-    ("Green Wood Refine",   "Green Wood Log",    2, "Green Wood Plank",    1, "Wood"),
+    # Wood (Basic)
+    ("Green Wood Refine",   "Green Wood Log",    3, "Green Wood Plank",    1, "Wood"),
     ("Soft Wood Refine",    "Soft Wood Log",     2, "Soft Wood Plank",     2, "Wood"),
-    ("Seasoned Wood Refine","Seasoned Wood Log",  2, "Seasoned Wood Plank", 3, "Wood"),
-    ("Hard Wood Refine",    "Hard Wood Log",     2, "Hard Wood Plank",     4, "Wood"),
-    ("Elder Wood Refine",   "Elder Wood Log",    2, "Elder Wood Plank",    5, "Wood"),
-    ("Ancient Wood Refine", "Ancient Wood Log",  2, "Ancient Wood Plank",  6, "Wood"),
+    ("Seasoned Wood Refine","Seasoned Wood Log", 3, "Seasoned Wood Plank", 3, "Wood"),
+    ("Hard Wood Refine",    "Hard Wood Log",     3, "Hard Wood Plank",     4, "Wood"),
+    ("Elder Wood Refine",   "Elder Wood Log",    3, "Elder Wood Plank",    5, "Wood"),
+    ("Ancient Wood Refine", "Ancient Wood Log",  3, "Ancient Wood Plank",  6, "Wood"),
 
-    # Cloth -- 2 scrap -> 1 bolt
+    # Cloth (Basic)
     ("Jute Refine",         "Jute Scrap",        2, "Bolt of Jute",        1, "Cloth"),
     ("Wool Refine",         "Wool Scrap",        2, "Bolt of Wool",        2, "Cloth"),
     ("Cotton Refine",       "Cotton Scrap",      2, "Bolt of Cotton",      3, "Cloth"),
     ("Linen Refine",        "Linen Scrap",       2, "Bolt of Linen",       4, "Cloth"),
-    ("Silk Refine",         "Silk Scrap",        2, "Bolt of Silk",        5, "Cloth"),
+    ("Silk Refine",         "Silk Scrap",        3, "Bolt of Silk",        5, "Cloth"),
     ("Gossamer Refine",     "Gossamer Scrap",    2, "Bolt of Gossamer",    6, "Cloth"),
 
-    # Leather -- 2 section -> 1 square
-    ("Rawhide Refine",      "Rawhide Leather Section",  2, "Rawhide Leather Square",  1, "Leather"),
-    ("Thin Refine",         "Thin Leather Section",     2, "Thin Leather Square",     2, "Leather"),
-    ("Coarse Refine",       "Coarse Leather Section",   2, "Coarse Leather Square",   3, "Leather"),
-    ("Rugged Refine",       "Rugged Leather Section",   2, "Rugged Leather Square",   4, "Leather"),
-    ("Thick Refine",        "Thick Leather Section",    2, "Square of Thick Leather", 5, "Leather"),
-    ("Hardened Refine",     "Hardened Leather Section", 2, "Square of Hardened Leather", 6, "Leather"),
+    # Leather (Basic)
+    ("Rawhide Refine",      "Rawhide Leather Section",  2, "Stretched Rawhide Leather Square",  1, "Leather"),
+    ("Thin Refine",         "Thin Leather Section",     2, "Cured Thin Leather Square",     2, "Leather"),
+    ("Coarse Refine",       "Coarse Leather Section",   2, "Cured Coarse Leather Square",   3, "Leather"),
+    ("Rugged Refine",       "Rugged Leather Section",   2, "Cured Rugged Leather Square",   4, "Leather"),
+    ("Thick Refine",        "Thick Leather Section",    3, "Cured Thick Leather Square", 5, "Leather"),
+    ("Hardened Refine",     "Hardened Leather Section", 2, "Cured Hardened Leather Square", 6, "Leather"),
 ]
 
 
@@ -115,7 +117,7 @@ def page_refinements() -> None:
     st.caption(
         "Profit from refining raw materials at a crafting station (no Spirit Shards). "
         "Formula: Revenue = refined_sell x 0.85 (TP tax). "
-        "Cost = 2 x raw_buy. Sorted by profit per craft. "
+        "Cost = raw_qty x raw_buy. Sorted by profit per craft. "
         "Strategy assumes purchasing raw materials via buy orders and selling refined via sell orders."
     )
 
@@ -181,9 +183,9 @@ def page_refinements() -> None:
 
     with st.expander("How this works"):
         st.markdown(
-            "All recipes use a simple 2:1 ratio at a crafting station:\n"
-            "- 2 raw material -> 1 refined material (no additional cost)\n\n"
-            "**Profit** = (refined sell price x 0.85) - (2 x raw buy price)\n\n"
+            "All recipes use a specific ratio at a crafting station:\n"
+            "- N raw material -> 1 refined material (no additional cost)\n\n"
+            "**Profit** = (refined sell price x 0.85) - (raw qty x raw buy price)\n\n"
             "**When to buy inputs:** If profit is positive, place buy orders for the raw material and sell orders for the "
             "refined output once crafted.\n\n"
             "Alloy ingots (Bronze, Steel, Darksteel) require vendor lumps and are excluded."
