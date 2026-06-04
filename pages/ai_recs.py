@@ -6,6 +6,7 @@ via direct TP sale, Mystic Forge promotion, or crafting refinement.
 
 import io
 import re
+import time
 from datetime import date, datetime
 from typing import Optional
 import streamlit as st
@@ -388,6 +389,9 @@ def _call_gemini(api_key: str, snapshot: str) -> str:
     return _extract_text(response2) or "*No analysis was generated. Please try again.*"
 
 
+# ── Global Rate Limit ────────────────────────────────────────────────
+_RATE_LIMIT_SECONDS = 60.0
+
 # ── Page ─────────────────────────────────────────────────────────────
 
 def page_ai_recommendations() -> None:
@@ -405,40 +409,49 @@ def page_ai_recommendations() -> None:
     )
 
     if st.button("🤖 Analyze My Holdings", type="primary"):
-        with st.spinner("Loading market data and your inventory..."):
-            try:
-                ctx = _load_sell_context()
-            except Exception as exc:
-                import traceback
-                traceback.print_exc()
-                st.error("Database error. Check server logs.")
-                return
+        current_time = time.time()
+        last_call = st.session_state.get("ai_recs_last_call", 0.0)
+        elapsed = current_time - last_call
 
-            if ctx["df"].empty:
-                st.warning(
-                    "No owned items found. Make sure your n8n inventory "
-                    "workflow is running."
-                )
-                return
+        if elapsed < _RATE_LIMIT_SECONDS:
+            st.error(f"Please wait {int(_RATE_LIMIT_SECONDS - elapsed)} seconds before analyzing again to prevent API abuse.")
+        else:
+            with st.spinner("Loading market data and your inventory..."):
+                try:
+                    ctx = _load_sell_context()
+                    db_error = False
+                except Exception as exc:
+                    import traceback
+                    traceback.print_exc()
+                    st.error("Database error. Check server logs.")
+                    db_error = True
 
-            owned_count = len(ctx["df"])
-            promo_count = len(ctx["promotions"])
-            ref_count   = len(ctx["refinements"])
-            st.caption(
-                f"Found {owned_count} owned items, "
-                f"{promo_count} profitable promotions, "
-                f"{ref_count} profitable refinements."
-            )
+                if not db_error:
+                    if ctx["df"].empty:
+                        st.warning(
+                            "No owned items found. Make sure your n8n inventory "
+                            "workflow is running."
+                        )
+                    else:
+                        owned_count = len(ctx["df"])
+                        promo_count = len(ctx["promotions"])
+                        ref_count   = len(ctx["refinements"])
+                        st.caption(
+                            f"Found {owned_count} owned items, "
+                            f"{promo_count} profitable promotions, "
+                            f"{ref_count} profitable refinements."
+                        )
 
-        with st.spinner("Searching GW2 news and analyzing your holdings..."):
-            try:
-                snapshot = _build_sell_snapshot(ctx)
-                analysis = _call_gemini(api_key, snapshot)
-                st.session_state["ai_analysis"] = analysis
-            except Exception as exc:
-                import traceback
-                traceback.print_exc()
-                st.error("Gemini API error. Check server logs.")
+                        with st.spinner("Searching GW2 news and analyzing your holdings..."):
+                            try:
+                                snapshot = _build_sell_snapshot(ctx)
+                                analysis = _call_gemini(api_key, snapshot)
+                                st.session_state["ai_analysis"] = analysis
+                                st.session_state["ai_recs_last_call"] = time.time()
+                            except Exception as exc:
+                                import traceback
+                                traceback.print_exc()
+                                st.error("Gemini API error. Check server logs.")
 
     if "ai_analysis" in st.session_state:
         st.divider()

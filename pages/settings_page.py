@@ -34,6 +34,7 @@ def page_settings() -> None:
             "Gemini API Key",
             value=current.get("gemini_api_key", ""),
             type="password",
+            max_chars=150,
             help="Required for the AI Recommendations page. Get a key at https://aistudio.google.com/apikey",
         )
 
