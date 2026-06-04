@@ -12,3 +12,8 @@
 **Vulnerability:** The `settings.json` file, which stores sensitive configuration data such as the Gemini API Key, was being created with default file permissions (typically 644). This allowed read access to the API key by any user on the host system or container.
 **Learning:** Storing API keys or sensitive credentials in plaintext configuration files without explicit permission restrictions violates the principle of least privilege and introduces a risk of unauthorized access.
 **Prevention:** Always explicitly set restrictive file permissions (e.g., `chmod(0o600)`) on configuration files that store secrets after creation or modification to ensure only the owner can read or write to them.
+
+## 2026-06-03 - [Security Enhancement] Missing Rate Limiting on External API Calls
+**Vulnerability:** The AI Recommendations page (`pages/ai_recs.py`) lacked rate limiting for the Gemini API call triggered by the "Analyze My Holdings" button. This could allow malicious or accidental repeated clicks to exhaust API quotas or incur unexpected financial costs (Financial Denial of Service - FDoS).
+**Learning:** Any user-triggered action that invokes an external, potentially paid API or performs a computationally expensive operation must have rate limiting or throttling applied to prevent abuse and manage costs.
+**Prevention:** Implement global or per-user rate limiting (e.g., using `time.time()` in Streamlit's session state or a module-level variable) to ensure minimum delays between consecutive API calls.
