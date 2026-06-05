@@ -30,9 +30,13 @@ def page_settings() -> None:
             help="All chart timestamps will be converted to this timezone.",
         )
 
+        has_key = bool(current.get("gemini_api_key"))
+        placeholder = "********" if has_key else ""
+
         api_key = st.text_input(
             "Gemini API Key",
-            value=current.get("gemini_api_key", ""),
+            value="",
+            placeholder=placeholder,
             type="password",
             max_chars=150,
             help="Required for the AI Recommendations page. Get a key at https://aistudio.google.com/apikey",
@@ -41,6 +45,13 @@ def page_settings() -> None:
         submitted = st.form_submit_button("Save Settings", type="primary")
 
     if submitted:
-        save_settings({"timezone": timezone, "gemini_api_key": api_key})
+        new_settings = {"timezone": timezone}
+        # Only update the API key if a new one was provided
+        if api_key:
+            new_settings["gemini_api_key"] = api_key
+        else:
+            new_settings["gemini_api_key"] = current.get("gemini_api_key", "")
+
+        save_settings(new_settings)
         st.success("Settings saved successfully!")
         st.balloons()

@@ -17,3 +17,8 @@
 **Vulnerability:** The AI Recommendations page (`pages/ai_recs.py`) lacked rate limiting for the Gemini API call triggered by the "Analyze My Holdings" button. This could allow malicious or accidental repeated clicks to exhaust API quotas or incur unexpected financial costs (Financial Denial of Service - FDoS).
 **Learning:** Any user-triggered action that invokes an external, potentially paid API or performs a computationally expensive operation must have rate limiting or throttling applied to prevent abuse and manage costs.
 **Prevention:** Implement global or per-user rate limiting (e.g., using `time.time()` in Streamlit's session state or a module-level variable) to ensure minimum delays between consecutive API calls.
+
+## 2026-06-05 - [Information Exposure] Sensitive Data Leakage via UI Form Values
+**Vulnerability:** The Streamlit application was rendering the plaintext Gemini API key inside the HTML value attribute of a text input field (`value=current.get("gemini_api_key", "")`). Although `type="password"` visually obscures the input, the plaintext secret is still sent to the user's browser DOM, making it readable by browser extensions or through DOM inspection tools.
+**Learning:** Returning secrets directly to the UI layer as form values is an Information Exposure risk. Web interfaces should act as write-only sinks for secrets or provide indirect representations.
+**Prevention:** Use placeholder text (e.g., `"********"`) to indicate a secret is saved, keep the actual `value` empty, and update the backend secret only if the user submits a new value.
