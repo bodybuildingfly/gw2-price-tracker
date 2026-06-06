@@ -22,3 +22,8 @@
 **Vulnerability:** The Streamlit application was rendering the plaintext Gemini API key inside the HTML value attribute of a text input field (`value=current.get("gemini_api_key", "")`). Although `type="password"` visually obscures the input, the plaintext secret is still sent to the user's browser DOM, making it readable by browser extensions or through DOM inspection tools.
 **Learning:** Returning secrets directly to the UI layer as form values is an Information Exposure risk. Web interfaces should act as write-only sinks for secrets or provide indirect representations.
 **Prevention:** Use placeholder text (e.g., `"********"`) to indicate a secret is saved, keep the actual `value` empty, and update the backend secret only if the user submits a new value.
+
+## 2026-06-06 - [Denial of Service] Rate Limit Bypass on Backend Failure (FDoS)
+**Vulnerability:** The AI Recommendations rate limit state (`st.session_state["ai_recs_last_call"]`) was only being updated *after* the Gemini API returned successfully. If an attacker spammed the button and the backend failed, the limit state wasn't updated, allowing repeated calls causing a Financial Denial of Service (FDoS).
+**Learning:** State management for security mechanisms like rate limiting must happen at the point of action initiation, not solely upon successful completion. Failing to commit the rate limit token early allows bypass through intentionally malformed requests or backend timeouts.
+**Prevention:** Always update the rate limit state marker immediately upon passing the check, *before* executing the expensive or rate-limited operation.

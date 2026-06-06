@@ -416,6 +416,7 @@ def page_ai_recommendations() -> None:
         if elapsed < _RATE_LIMIT_SECONDS:
             st.error(f"Please wait {int(_RATE_LIMIT_SECONDS - elapsed)} seconds before analyzing again to prevent API abuse.")
         else:
+            st.session_state["ai_recs_last_call"] = current_time
             with st.spinner("Loading market data and your inventory..."):
                 try:
                     ctx = _load_sell_context()
@@ -447,7 +448,6 @@ def page_ai_recommendations() -> None:
                                 snapshot = _build_sell_snapshot(ctx)
                                 analysis = _call_gemini(api_key, snapshot)
                                 st.session_state["ai_analysis"] = analysis
-                                st.session_state["ai_recs_last_call"] = time.time()
                             except Exception as exc:
                                 import traceback
                                 traceback.print_exc()
