@@ -27,3 +27,8 @@
 **Vulnerability:** The AI Recommendations rate limit state (`st.session_state["ai_recs_last_call"]`) was only being updated *after* the Gemini API returned successfully. If an attacker spammed the button and the backend failed, the limit state wasn't updated, allowing repeated calls causing a Financial Denial of Service (FDoS).
 **Learning:** State management for security mechanisms like rate limiting must happen at the point of action initiation, not solely upon successful completion. Failing to commit the rate limit token early allows bypass through intentionally malformed requests or backend timeouts.
 **Prevention:** Always update the rate limit state marker immediately upon passing the check, *before* executing the expensive or rate-limited operation.
+
+## 2026-06-08 - [Denial of Service] Resource Exhaustion via Unbounded Cache
+**Vulnerability:** The Streamlit application was using `@st.cache_data` without a `max_entries` limit for dynamically parameterized queries like `fetch_price_history(item_id: int)`. Since there are thousands of unique items, querying many items would cause the cache to grow indefinitely, exhausting server memory (OOM) and causing a Denial of Service.
+**Learning:** In long-running Streamlit applications, unbounded caches on functions that accept a large domain of unique parameters will inevitably leak memory. Caches must always be bounded to limit the memory footprint.
+**Prevention:** Always explicitly define `max_entries` on `@st.cache_data` and `@st.cache_resource` decorators for parameterized functions to enforce a strict memory boundary.
