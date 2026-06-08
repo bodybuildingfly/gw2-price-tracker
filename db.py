@@ -79,7 +79,7 @@ def fetch_item_list() -> pd.DataFrame:
     )
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=50)
 def fetch_price_history(item_id: int) -> pd.DataFrame:
     """Return raw 3-hour price/volume rows for a single item."""
     return run_query(
@@ -97,7 +97,7 @@ def fetch_price_history(item_id: int) -> pd.DataFrame:
     )
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False, max_entries=50)
 def fetch_price_history_batch(item_ids: tuple[int]) -> pd.DataFrame:
     """Return raw 3-hour price/volume rows for multiple items."""
     if not item_ids:
