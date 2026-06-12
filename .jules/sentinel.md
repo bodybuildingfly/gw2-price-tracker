@@ -32,3 +32,8 @@
 **Vulnerability:** The Streamlit application was using `@st.cache_data` without a `max_entries` limit for dynamically parameterized queries like `fetch_price_history(item_id: int)`. Since there are thousands of unique items, querying many items would cause the cache to grow indefinitely, exhausting server memory (OOM) and causing a Denial of Service.
 **Learning:** In long-running Streamlit applications, unbounded caches on functions that accept a large domain of unique parameters will inevitably leak memory. Caches must always be bounded to limit the memory footprint.
 **Prevention:** Always explicitly define `max_entries` on `@st.cache_data` and `@st.cache_resource` decorators for parameterized functions to enforce a strict memory boundary.
+
+## 2026-06-12 - [Denial of Service] Resource Exhaustion via Hanging External API Calls
+**Vulnerability:** The application was calling the Gemini API (`genai.Client`) without explicitly configuring a timeout (`http_options={'timeout': ...}`).
+**Learning:** External services can hang indefinitely without explicitly terminating the connection. If the user invokes this action repeatedly, the server will keep those connections open, consuming resources until memory exhaustion or connection limits are reached (Resource Exhaustion/DoS).
+**Prevention:** When using external API clients, always specify explicit timeouts to force a failure and resource cleanup if the external dependency stops responding.

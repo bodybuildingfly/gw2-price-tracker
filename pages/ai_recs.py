@@ -352,7 +352,7 @@ def _extract_text(response) -> str:
 
 
 def _call_gemini(api_key: str, snapshot: str) -> str:
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=api_key, http_options={'timeout': 30.0})
     system = _SYSTEM_PROMPT.format(today=date.today().isoformat())
     user_content = (
         "Here is my complete market data. Search for current GW2 news "
